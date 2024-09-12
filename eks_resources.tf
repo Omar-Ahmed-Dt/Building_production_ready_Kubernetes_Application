@@ -140,3 +140,110 @@ server:
 EOF
   ]
 }
+
+# Fetch info about ingress and point using Route53 to the ingress URL
+data "kubernetes_service_v1" "ingress_service" {
+  metadata {
+    name      = "ingress-nginx-controller"
+    namespace = "ingress-nginx"
+  }
+}
+
+data "aws_route53_zone" "default" {
+  name = "enkidudev.website"
+}
+
+# Create CNAME Record
+resource "aws_route53_record" "ingress_record" {
+  zone_id = data.aws_route53_zone.default.zone_id
+  name    = "app.enkidudev.website"
+  type    = "CNAME"
+  ttl     = "300"
+  records = [
+    data.kubernetes_service_v1.ingress_service.status[0].load_balancer[0].ingress[0].hostname
+  ]
+}
+
+data "kubernetes_service_v1" "argo_service" {
+  metadata {
+    name      = "argo-cd-server"
+    namespace = "argo-cd"
+  }
+}
+
+# Create CNAME Record
+resource "aws_route53_record" "argo_record" {
+  zone_id = data.aws_route53_zone.default.zone_id
+  name    = "www.enkidudev.website"
+  type    = "CNAME"
+  ttl     = "300"
+  records = [
+    data.kubernetes_service_v1.argo_service.status[0].load_balancer[0].ingress[0].hostname
+  ]
+}
+# The ClusterIssuer is an object in Kubernetes, managed by cert-manager,
+# that allows you to issue TLS certificates for your services using Let's Encrypt.
+# Certificate Issuance: When you later create a Certificate resource in Kubernetes and reference this ClusterIssuer, 
+#cert-manager will handle the ACME challenge with Let's Encrypt and automatically issue a certificate for the domain(s) you specify.
+resource "kubernetes_manifest" "cert_issuer" {
+  manifest = yamldecode(<<YAML
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: omarahmed9113@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+YAML
+  )
+
+  depends_on = [
+    kubernetes_service_account_v1.secret_store
+  ]
+}
+
+
+# creates a Kubernetes service account secret-store in the external-secrets namespace
+data "aws_caller_identity" "current" {}
+
+resource "kubernetes_service_account_v1" "secret_store" {
+  metadata {
+    namespace = "external-secrets"
+    name      = "secret-store"
+    annotations = {
+      # 
+      "eks.amazonaws.com/role-arn" = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/secret-store"
+    }
+  }
+}
+
+resource "kubernetes_manifest" "cluster_secret_store" {
+  manifest = yamldecode(<<YAML
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: aws-store
+spec:
+  provider:
+    aws:
+      service: ParameterStore
+      region: us-east-1 
+      auth:
+        jwt:
+          serviceAccountRef:
+            name: secret-store
+            namespace: external-secrets
+YAML
+  )
+
+  depends_on = [
+    kubernetes_service_account_v1.secret_store
+  ]
+}
