@@ -209,7 +209,6 @@ YAML
   ]
 }
 
-
 # creates a Kubernetes service account secret-store in the external-secrets namespace
 data "aws_caller_identity" "current" {}
 
@@ -223,7 +222,10 @@ resource "kubernetes_service_account_v1" "secret_store" {
     }
   }
 }
-
+# custom resource, which is used by the External Secrets Operator to manage and 
+# retrieve secrets from AWS's Parameter Store (or Secrets Manager) within Kubernetes.
+# is part of the External Secrets Operator, which fetches secrets from external providers (AWS in this case).
+# It points to AWS Parameter Store as the secret provider and uses a Kubernetes service account to authenticate with AWS.
 resource "kubernetes_manifest" "cluster_secret_store" {
   manifest = yamldecode(<<YAML
 apiVersion: external-secrets.io/v1beta1

@@ -38,6 +38,7 @@ provider "kubernetes" {
   token                  = data.aws_eks_cluster_auth.cluster_auth.token
 }
 
+
 # Helm provider configuration (optional: if you want to specify, but can rely on Kubernetes provider)
 provider "helm" {
   kubernetes {
